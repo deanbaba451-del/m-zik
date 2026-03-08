@@ -1,3 +1,2 @@
-telethon
-asyncio
-aiohttp
+python-telegram-bot
+openai
