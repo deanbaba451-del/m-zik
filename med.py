@@ -4,8 +4,8 @@ from telethon import TelegramClient, events
 from telethon.sessions import StringSession
 
 # --- AYARLAR ---
-API_ID = 9045fafb55bc4aa6fa2aadafbb1f2e1e
-API_HASH = '36856573'
+API_ID = 36856573
+API_HASH = '9045fafb55bc4aa6fa2aadafbb1f2e1e'
 SESSION_STRING = '1AZWarzcBu51WB3mMH821DzBiaozgnIzAzbsu1H6fqydatjnCYfcgl8dBFltBqWjWDTPI_NscQQ45chKjk5bnG824qjulAW2O8x4vIYQqb6ZAwWajQtgqSguIFZRkZQwJelriY3mhMtIWJHxITZPOEzHbFH9JHRAh6cYCaC1a7Z4isn6Z37vtjs2YICTcDdNF-WY5PYE_Qz0VnY6j9cp1wEHL5oOrprapTeIITZrzvixJ_IG01ULsTSHU0BNyXhEHvmKszN-oWXGkABtT2lqnWLOD0FQNkFClbI1Y3OUgZ1MtZGoP_ytkIg9Q3Tz_eaJ91QyVoK1nJRpPy_DH6brBsUxIfytfAss='
 
 # Yetkili ID Listesi
