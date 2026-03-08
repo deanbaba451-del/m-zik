@@ -38,13 +38,13 @@ async def command_handler(event):
     cmd = event.pattern_match.group(1)
     if cmd == 'doeda':
         bot_mode = 1
-        await event.respond("🛡 **Doeda Modu Aktif!** Grup tamamen kilitlendi.")
+        await event.respond("🛡 **Doedanın annesinin sikilme modu Aktif!** Grup tamamen kilitlendi.")
     elif cmd == 'gayeda':
         bot_mode = 2
-        await event.respond("🛡 **Gayeda Modu Aktif!** Sadece Metin ve Seslere izin var.")
+        await event.respond("🛡 **doedanın annesini tecavüz etme Modu Aktif!** Sadece Metin ve Seslere izin var.")
     elif cmd == 'stop':
         bot_mode = 0
-        await event.respond("🛑 **Koruma Durduruldu.** Sadece numara avcısı aktif.")
+        await event.respond("🛑 **anne sikme durduruldu**.")
 
 # --- KORUMA VE NUMARA FİLTRESİ ---
 @client.on(events.NewMessage)
