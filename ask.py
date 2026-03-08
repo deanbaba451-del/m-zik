@@ -6,7 +6,7 @@ from openai import OpenAI
 
 # Render panelinden (Environment Variables) gelen bilgiler
 tg_token = os.getenv("TG_TOKEN")
-openai_key = os.getenv("OPENAI_KEY")
+openai_key = os.getenv("OPENAI_API_KEY")
 
 client = OpenAI(api_key=openai_key)
 
