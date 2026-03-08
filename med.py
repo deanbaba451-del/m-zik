@@ -1,65 +1,95 @@
 import asyncio
 import re
+import os
+import threading
+from http.server import HTTPServer, BaseHTTPRequestHandler
 from telethon import TelegramClient, events
 from telethon.sessions import StringSession
 
 # --- AYARLAR ---
 API_ID = 36856573
 API_HASH = '9045fafb55bc4aa6fa2aadafbb1f2e1e'
-# Session String başına tırnakları ve boşlukları kontrol ederek tam yapıştır
-SESSION_STRING = '1BJWap1sBuxwiAI-Ui9NBh4e3GGk2nNVsX0TUfv_FPskG_7H0PNuA0AsLLWW5sRIg2gH8J3z_LmyhUoLngHf3KYBdidK8__r29pO5xHRnv0v8N_eD6DhuFevv0NbWXyhEFU-kdY3xXLf3yKCCD-g_bU-hZEYGXsz98fdsAACrB8yNoMApZNkoK2OfQ7NNR9k5bZWthtrhY9zK6fSx--Jpoh_WhfGsw2r47zt8kz1ePHJmBnVrWQO6iB5amqgu0b9bcO4zHi8RQRMeFeHuWvj78r78haGOx4TZi8LpopZxYaBmQuXwJrEARHjSXkl8lOXkgt2wMDk-1qkLzXWT2VWaKZcqqZH9fyk='
+SESSION_STRING = '1AZWarzcBu51WB3mMH821DzBiaozgnIzAzbsu1H6fqydatjnCYfcgl8dBFltBqWjWDTPI_NscQQ45chKjk5bnG824qjulAW2O8x4vIYQqb6ZAwWajQtgqSguIFZRkZQwJelriY3mhMtIWJHxITZPOEzHbFH9JHRAh6cYCaC1a7Z4isn6Z37vtjs2YICTcDdNF-WY5PYE_Qz0VnY6j9cp1wEHL5oOrprapTeIITZrzvixJ_IG01ULsTSHU0BNyXhEHvmKszN-oWXGkABtT2lqnWLOD0FQNkFClbI1Y3OUgZ1MtZGoP_ytkIg9Q3Tz_eaJ91QyVoK1nJRpPy_DH6brBsUxIfytfAss='
 
+# Yetkili ID'ler (Komutları kullanabilen ve silinmeyen kişiler)
 AUTHORIZED_IDS = [8343507331, 6534222591, 8256872080, 7727812432]
-bot_mode = 0
+bot_mode = 0  # 0: Kapalı, 1: Doeda (Her şeyi sil), 2: Gayeda (Medya sil)
 
-# Session String ile istemciyi başlatıyoruz
 client = TelegramClient(StringSession(SESSION_STRING), API_ID, API_HASH)
 
+# --- RENDER PORT HATASINI ENGELLEMEK İÇİN SUNUCU ---
+class WebServer(BaseHTTPRequestHandler):
+    def do_GET(self):
+        self.send_response(200)
+        self.send_header('Content-type', 'text/html')
+        self.end_headers()
+        self.wfile.write(b"Bot is active and running!")
+
+def run_http_server():
+    port = int(os.environ.get("PORT", 10000))
+    server = HTTPServer(('0.0.0.0', port), WebServer)
+    print(f"Web sunucusu {port} portunda calisiyor.")
+    server.serve_forever()
+
+# --- BOT KOMUTLARI ---
 @client.on(events.NewMessage(pattern=r'/(doeda|gayeda|stop)', from_users=AUTHORIZED_IDS))
 async def command_handler(event):
     global bot_mode
     cmd = event.pattern_match.group(1)
+    
     if cmd == 'doeda':
         bot_mode = 1
-        await event.respond("🛡 **Doeda Modu Aktif!**")
+        await event.respond("🛡 **Doeda Modu Aktif:** Grup tamamen kilitlendi, her şey silinecek!")
     elif cmd == 'gayeda':
         bot_mode = 2
-        await event.respond("🛡 **Gayeda Modu Aktif!**")
+        await event.respond("🛡 **Gayeda Modu Aktif:** Sadece Metin ve Seslere izin var, medya silinecek!")
     elif cmd == 'stop':
         bot_mode = 0
-        await event.respond("🛑 **Koruma Durduruldu.**")
+        await event.respond("🛑 **Koruma Durduruldu.** Sadece numara takibi aktif.")
 
+# --- KORUMA VE NUMARA FİLTRESİ ---
 @client.on(events.NewMessage)
 async def protection_handler(event):
     global bot_mode
+    
+    # Yetkiliyse veya botun kendi mesajıysa işlem yapma
     if event.sender_id in AUTHORIZED_IDS or event.out:
         return
 
-    # Telefon numarası filtresi
-    if re.search(r'(\+?\d{1,3}[-.\s]?)?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}', event.raw_text):
+    # 1. ÖNCELİK: NUMARA SİLME (Komutlardan bağımsız her zaman çalışır)
+    # Bu regex farklı formatlardaki telefon numaralarını yakalar
+    phone_pattern = r'(\+?\d{1,3}[-.\s]?)?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}'
+    if re.search(phone_pattern, event.raw_text):
         await event.delete()
-        return
+        print(f"Numara paylasimi engellendi: {event.sender_id}")
+        return # Numara bulduysa ve sildiyse alt tarafa bakmasına gerek yok
 
+    # 2. MODLARA GÖRE SİLME
     if bot_mode == 1:
+        # Doeda: Her şeyi sil
         await event.delete()
+    
     elif bot_mode == 2:
-        if event.media and not (event.voice or event.audio):
-            await event.delete()
+        # Gayeda: Metin (text) ve Ses (voice/audio) hariç her şeyi sil
+        if event.media:
+            if not (event.voice or event.audio):
+                await event.delete()
 
 async def start_bot():
-    print("Bot bağlanıyor...")
-    # DİKKAT: client.start() yerine client.connect() kullanarak numara sormasını engelliyoruz
+    print("Bot baglaniyor...")
     await client.connect()
-    
     if not await client.is_user_authorized():
-        print("HATA: Session String geçersiz! Lütfen yeni bir session al.")
+        print("HATA: Session String gecersiz!")
         return
-        
-    print("Bot başarıyla bağlandı!")
+    print("Bot basariyla baglandi!")
     await client.run_until_disconnected()
 
 if __name__ == '__main__':
+    # Web sunucusunu başlat (Render kapanmasın diye)
+    threading.Thread(target=run_http_server, daemon=True).start()
+    
+    # Botu başlat
     try:
         asyncio.run(start_bot())
-    except Exception as e:
-        print(f"Bir hata oluştu: {e}")
+    except (KeyboardInterrupt, SystemExit):
+        pass
