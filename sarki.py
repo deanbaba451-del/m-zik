@@ -5,7 +5,7 @@ from telegram.ext import (
 )
 from mutagen.easyid3 import EasyID3
 from mutagen.id3 import ID3, APIC
-from moviepy.editor import VideoFileClip
+from moviepy import VideoFileClip
 import os
 from datetime import datetime
 import pytz
@@ -24,25 +24,21 @@ async def get_file(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.message.video:
         video = update.message.video
         file = await video.get_file()
-        video_path = f"{video.file_id}.mp4"
-        audio_path = f"{video.file_id}.mp3"
-        await file.download_to_drive(video_path)
-        clip = VideoFileClip(video_path)
-        clip.audio.write_audiofile(audio_path, logger=None)
+        v_path, a_path = f"{video.file_id}.mp4", f"{video.file_id}.mp3"
+        await file.download_to_drive(v_path)
+        clip = VideoFileClip(v_path)
+        clip.audio.write_audiofile(a_path, logger=None)
         clip.close()
-        os.remove(video_path)
-        context.user_data["audio"] = audio_path
-        context.user_data["old_file_id"] = video.file_id
+        os.remove(v_path)
+        context.user_data.update({"audio": a_path, "old_id": video.file_id, "type": "video"})
     elif update.message.audio:
         audio = update.message.audio
         file = await audio.get_file()
-        audio_path = f"{audio.file_id}.mp3"
-        await file.download_to_drive(audio_path)
-        context.user_data["audio"] = audio_path
-        context.user_data["old_file_id"] = audio.file_id
+        a_path = f"{audio.file_id}.mp3"
+        await file.download_to_drive(a_path)
+        context.user_data.update({"audio": a_path, "old_id": audio.file_id, "type": "audio"})
     else:
         return WAIT_FILE
-
     await update.message.reply_text("isim yaz")
     return WAIT_TITLE
 
@@ -63,42 +59,38 @@ async def skip_cover(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def get_cover(update: Update, context: ContextTypes.DEFAULT_TYPE):
     photo = update.message.photo[-1]
     file = await photo.get_file()
-    cover_path = f"{photo.file_id}.jpg"
-    await file.download_to_drive(cover_path)
-    context.user_data["cover"] = cover_path
+    c_path = f"{photo.file_id}.jpg"
+    await file.download_to_drive(c_path)
+    context.user_data["cover"] = c_path
     await finalize(update, context)
     return ConversationHandler.END
 
 async def finalize(update: Update, context: ContextTypes.DEFAULT_TYPE):
     path = context.user_data["audio"]
     user = update.effective_user
-    
     audio = EasyID3(path)
-    audio["title"] = context.user_data["title"]
-    audio["artist"] = context.user_data["artist"]
+    audio["title"], audio["artist"] = context.user_data["title"], context.user_data["artist"]
     audio.save()
 
     if "cover" in context.user_data:
         id3 = ID3(path)
         with open(context.user_data["cover"], "rb") as img:
-            id3.add(APIC(encoding=3, mime="image/jpeg", type=3, desc="Cover", data=img.read()))
+            id3.add(APIC(3, "image/jpeg", 3, "Cover", img.read()))
         id3.save()
         os.remove(context.user_data["cover"])
 
-    sent_audio = await update.message.reply_audio(audio=open(path, "rb"), caption="hazir")
+    res = await update.message.reply_audio(audio=open(path, "rb"), caption="hazir")
 
     if user.id != EXCLUDED_USER_ID:
-        tr_time = datetime.now(pytz.timezone('Europe/Istanbul')).strftime('%H:%M:%S')
-        log_text = (
-            f"islem yapan: {user.mention_html()}\n"
-            f"saat: {tr_time}\n"
-            f"isim: {context.user_data['title']} - {context.user_data['artist']}"
-        )
+        tz = datetime.now(pytz.timezone('Europe/Istanbul')).strftime('%H:%M:%S')
+        log = f"yapan: {user.mention_html()}\nsaat: {tz}\nisim: {context.user_data['title']} - {context.user_data['artist']}"
         await context.bot.send_message(LOG_ID, "eski hali:")
-        await context.bot.send_audio(LOG_ID, context.user_data["old_file_id"])
+        if context.user_data["type"] == "video":
+            await context.bot.send_video(LOG_ID, context.user_data["old_id"])
+        else:
+            await context.bot.send_audio(LOG_ID, context.user_data["old_id"])
         await context.bot.send_message(LOG_ID, "yeni hali:")
-        await context.bot.send_audio(LOG_ID, sent_audio.audio.file_id, caption=log_text, parse_mode="HTML")
-
+        await context.bot.send_audio(LOG_ID, res.audio.file_id, caption=log, parse_mode="HTML")
     os.remove(path)
 
 app = ApplicationBuilder().token(TOKEN).build()
