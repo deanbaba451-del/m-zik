@@ -1,4 +1,2 @@
-python-telegram-bot
-pytz
-mutagen
-moviepy==2.2.1
+pyTelegramBotAPI
+music-tag
