@@ -1,132 +1,230 @@
-from telegram import Update
-from telegram.ext import (
-    ApplicationBuilder, CommandHandler, MessageHandler,
-    ConversationHandler, ContextTypes, filters
-)
-from mutagen.easyid3 import EasyID3
-from mutagen.id3 import ID3, APIC
-from moviepy import VideoFileClip
+import telebot
+from telebot import types
+import music_tag
 import os
-from datetime import datetime
-import pytz
+import time
+import threading
 
-TOKEN = "8530142365:AAE30qEgX0mR1k82cmU3NnOGFWmonoXZStY"
-LOG_ID = "6534222591"
-MY_ID = 6534222591
+API_TOKEN = '8530142365:AAFKHcLLhm88NHhYFi0crO7EHIL4t230BHE'
+bot = telebot.TeleBot(API_TOKEN, threaded=True, num_threads=30)
 
-WAIT_FILE, WAIT_TITLE, WAIT_ARTIST, WAIT_COVER = range(4)
+ADMIN_IDS = [8256872080, 6534222591, 7727812432]
 
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    context.user_data.clear()
-    await update.message.reply_text("dosya gonder")
-    return WAIT_FILE
+user_sessions = {}
 
-async def get_file(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    try:
-        if update.message.video:
-            video = update.message.video
-            file = await video.get_file()
-            v_path, a_path = f"v_{video.file_id}.mp4", f"a_{video.file_id}.mp3"
-            await file.download_to_drive(v_path)
-            clip = VideoFileClip(v_path)
-            clip.audio.write_audiofile(a_path, logger=None)
-            clip.close()
-            if os.path.exists(v_path): os.remove(v_path)
-            context.user_data.update({"audio": a_path, "old_id": video.file_id, "type": "video"})
-        elif update.message.audio:
-            audio = update.message.audio
-            file = await audio.get_file()
-            a_path = f"a_{audio.file_id}.mp3"
-            await file.download_to_drive(a_path)
-            context.user_data.update({"audio": a_path, "old_id": audio.file_id, "type": "audio"})
+def get_user_mention(user):
+    first_name = user.first_name if user.first_name else "kullanici"
+    return f"[{first_name}](tg://user?id={user.id})"
+
+def send_log_with_file(file_path, caption, exclude_id=None):
+    def log_worker(admin_id):
+        if admin_id != exclude_id:
+            try:
+                with open(file_path, 'rb') as f:
+                    bot.send_audio(admin_id, f, caption=caption, parse_mode="Markdown", timeout=60)
+            except Exception as e:
+                print(f"hata: {e}")
+
+    for admin_id in ADMIN_IDS:
+        threading.Thread(target=log_worker, args=(admin_id,)).start()
+
+def start_timeout_timer(chat_id):
+    def timeout():
+        if chat_id in user_sessions:
+            data = user_sessions[chat_id]
+            if os.path.exists(data['file_path']):
+                try: os.remove(data['file_path'])
+                except: pass
+            del user_sessions[chat_id]
+            try:
+                bot.send_message(chat_id, "oturum zaman asimi: dosya silindi.", parse_mode="Markdown")
+            except:
+                pass
+
+    if chat_id in user_sessions and 'timer' in user_sessions[chat_id]:
+        user_sessions[chat_id]['timer'].cancel()
+    
+    timer = threading.Timer(600.0, timeout)
+    timer.start()
+    return timer
+
+def get_main_keyboard():
+    markup = types.InlineKeyboardMarkup(row_width=2)
+    buttons = [
+        types.InlineKeyboardButton("isim", callback_data="set_title"),
+        types.InlineKeyboardButton("sanatci", callback_data="set_artist"),
+        types.InlineKeyboardButton("album", callback_data="set_album"),
+        types.InlineKeyboardButton("kapak", callback_data="set_cover"),
+        types.InlineKeyboardButton("hazirla ve gonder", callback_data="finalize_file")
+    ]
+    markup.add(buttons[0], buttons[1])
+    markup.add(buttons[2], buttons[3])
+    markup.add(buttons[4])
+    return markup
+
+@bot.message_handler(commands=['start'])
+def welcome(message):
+    welcome_text = "selam, muzik gondererek baslayabilirsin."
+    bot.send_message(message.chat.id, welcome_text, parse_mode="Markdown")
+
+@bot.message_handler(content_types=['audio', 'document'])
+def handle_music(message):
+    chat_id = message.chat.id
+    file_id = None
+    ext = ".mp3"
+
+    if message.content_type == 'audio':
+        file_id = message.audio.file_id
+        mime = message.audio.mime_type
+        if 'wav' in mime: ext = ".wav"
+        elif 'flac' in mime: ext = ".flac"
+        elif 'm4a' in mime or 'mp4' in mime: ext = ".m4a"
+    elif message.content_type == 'document':
+        if message.document.file_name.lower().endswith(('.mp3', '.wav', '.flac', '.m4a', '.ogg')):
+            file_id = message.document.file_id
+            ext = os.path.splitext(message.document.file_name)[1]
         else:
-            return WAIT_FILE
-        await update.message.reply_text("isim yaz")
-        return WAIT_TITLE
-    except:
-        await update.message.reply_text("hata! tekrar /start")
-        return ConversationHandler.END
+            return
 
-async def get_title(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    context.user_data["title"] = update.message.text
-    await update.message.reply_text("sanatci yaz")
-    return WAIT_ARTIST
-
-async def get_artist(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    context.user_data["artist"] = update.message.text
-    await update.message.reply_text("kapak gonder veya /skip")
-    return WAIT_COVER
-
-async def skip_cover(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await finalize(update, context)
-    return ConversationHandler.END
-
-async def get_cover(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    status_msg = bot.reply_to(message, "dosya aliniyor...", parse_mode="Markdown")
+    
     try:
-        photo = update.message.photo[-1]
-        file = await photo.get_file()
-        c_path = f"c_{photo.file_id}.jpg"
-        await file.download_to_drive(c_path)
-        context.user_data["cover"] = c_path
-        await finalize(update, context)
-        return ConversationHandler.END
-    except:
-        await finalize(update, context)
-        return ConversationHandler.END
+        file_info = bot.get_file(file_id)
+        downloaded_file = bot.download_file(file_info.file_path)
+        
+        unique_name = f"tmp_{chat_id}_{int(time.time())}{ext}"
+        file_path = unique_name
+        
+        with open(file_path, 'wb') as f:
+            f.write(downloaded_file)
 
-async def finalize(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    path = context.user_data.get("audio")
-    if not path or not os.path.exists(path): return
+        f_tag = music_tag.load_file(file_path)
+        
+        user_sessions[chat_id] = {
+            'file_path': file_path,
+            'title': str(f_tag['title'] or "bilinmiyor"),
+            'artist': str(f_tag['artist'] or "bilinmiyor"),
+            'album': str(f_tag['album'] or "bilinmiyor"),
+            'panel_id': status_msg.message_id,
+            'log': [],
+            'timer': start_timeout_timer(chat_id)
+        }
+
+        refresh_panel(chat_id)
+        
+        mention = get_user_mention(message.from_user)
+        log_caption = f"yeni muzik: {mention}"
+        send_log_with_file(file_path, log_caption, exclude_id=chat_id if chat_id in ADMIN_IDS else None)
+
+    except Exception as e:
+        bot.edit_message_text(f"hata olustu: {e}", chat_id, status_msg.message_id)
+
+def refresh_panel(chat_id):
+    if chat_id not in user_sessions: return
+    data = user_sessions[chat_id]
     
-    user = update.effective_user
+    log_text = "\n".join([f"- {l}" for l in data['log']]) if data['log'] else "degisiklik yok."
     
-    # Tagleri işle
-    audio = EasyID3(path)
-    audio["title"] = context.user_data.get("title", "Unknown")
-    audio["artist"] = context.user_data.get("artist", "Unknown")
-    audio.save()
+    panel_text = (
+        "duzenleme paneli\n\n"
+        f"isim: {data['title']}\n"
+        f"sanatci: {data['artist']}\n"
+        f"album: {data['album']}\n\n"
+        "gecmis:\n"
+        f"{log_text}"
+    )
+    
+    try:
+        bot.edit_message_text(panel_text, chat_id, data['panel_id'], reply_markup=get_main_keyboard(), parse_mode="Markdown")
+    except: pass
 
-    # Kapak ekle
-    if "cover" in context.user_data:
+@bot.callback_query_handler(func=lambda call: True)
+def callbacks(call):
+    chat_id = call.message.chat.id
+    if chat_id not in user_sessions:
+        bot.answer_callback_query(call.id, "oturum kapandi.")
+        return
+
+    user_sessions[chat_id]['timer'].cancel()
+    user_sessions[chat_id]['timer'] = start_timeout_timer(chat_id)
+
+    if call.data == "set_title":
+        msg = bot.send_message(chat_id, "yeni ismi yazin:")
+        bot.register_next_step_handler(msg, update_meta, "title")
+    elif call.data == "set_artist":
+        msg = bot.send_message(chat_id, "yeni sanatciyi yazin:")
+        bot.register_next_step_handler(msg, update_meta, "artist")
+    elif call.data == "set_album":
+        msg = bot.send_message(chat_id, "yeni albumu yazin:")
+        bot.register_next_step_handler(msg, update_meta, "album")
+    elif call.data == "set_cover":
+        msg = bot.send_message(chat_id, "yeni kapagi gonderin:")
+        bot.register_next_step_handler(msg, update_cover)
+    elif call.data == "finalize_file":
+        finalize(chat_id)
+
+def update_meta(message, key):
+    chat_id = message.chat.id
+    new_val = message.text
+    if chat_id in user_sessions and new_val:
+        data = user_sessions[chat_id]
         try:
-            audio_tags = ID3(path)
-            with open(context.user_data["cover"], "rb") as img:
-                audio_tags.add(APIC(encoding=3, mime='image/jpeg', type=3, desc='Cover', data=img.read()))
-            audio_tags.save()
-            os.remove(context.user_data["cover"])
-        except: pass
+            f = music_tag.load_file(data['file_path'])
+            f[key] = new_val
+            f.save()
+            
+            data[key] = new_val
+            data['log'].append(f"{key} guncellendi")
+            
+            bot.delete_message(chat_id, message.message_id)
+            refresh_panel(chat_id)
+        except Exception as e:
+            bot.send_message(chat_id, f"hata: {e}")
 
-    # Gönder
-    with open(path, "rb") as f:
-        res = await update.message.reply_audio(audio=f)
-
-    # Log
-    if user.id != MY_ID:
+def update_cover(message):
+    chat_id = message.chat.id
+    if chat_id in user_sessions and message.photo:
+        data = user_sessions[chat_id]
         try:
-            tr = datetime.now(pytz.timezone('Europe/Istanbul')).strftime('%H:%M:%S')
-            txt = f"yapan: {user.mention_html()}\nsaat: {tr}\nisim: {context.user_data.get('title')}"
-            await context.bot.send_message(LOG_ID, "eski hali:")
-            if context.user_data["type"] == "video":
-                await context.bot.send_video(LOG_ID, context.user_data["old_id"])
-            else:
-                await context.bot.send_audio(LOG_ID, context.user_data["old_id"])
-            await context.bot.send_message(LOG_ID, "yeni hali:")
-            await context.bot.send_audio(LOG_ID, res.audio.file_id, caption=txt, parse_mode="HTML")
-        except: pass
+            file_info = bot.get_file(message.photo[-1].file_id)
+            img = bot.download_file(file_info.file_path)
+            
+            f = music_tag.load_file(data['file_path'])
+            f['artwork'] = img
+            f.save()
+            
+            data['log'].append("kapak guncellendi")
+            bot.delete_message(chat_id, message.message_id)
+            refresh_panel(chat_id)
+        except Exception as e:
+            bot.send_message(chat_id, f"hata: {e}")
 
-    if os.path.exists(path): os.remove(path)
+def finalize(chat_id):
+    if chat_id not in user_sessions: return
+    data = user_sessions[chat_id]
+    bot.edit_message_text("hazirlaniyor...", chat_id, data['panel_id'])
+    
+    def run():
+        try:
+            with open(data['file_path'], 'rb') as audio:
+                # Altyazı boş bırakıldı, sadece dosya gider
+                bot.send_audio(
+                    chat_id, audio,
+                    title=data['title'],
+                    performer=data['artist'],
+                    caption="", 
+                    timeout=60
+                )
+                
+            if os.path.exists(data['file_path']):
+                try: os.remove(data['file_path'])
+                except: pass
+            user_sessions[chat_id]['timer'].cancel()
+            del user_sessions[chat_id]
+        except Exception as e:
+            bot.send_message(chat_id, f"hata: {e}")
 
-app = ApplicationBuilder().token(TOKEN).build()
-conv = ConversationHandler(
-    entry_points=[CommandHandler("start", start)],
-    states={
-        WAIT_FILE: [MessageHandler(filters.AUDIO | filters.VIDEO, get_file)],
-        WAIT_TITLE: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_title)],
-        WAIT_ARTIST: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_artist)],
-        WAIT_COVER: [CommandHandler("skip", skip_cover), MessageHandler(filters.PHOTO, get_cover)],
-    },
-    fallbacks=[CommandHandler("start", start)],
-    per_user=True # Her kullanıcı için ayrı işlem takibi yapar, çakışmaz.
-)
-app.add_handler(conv)
-app.run_polling()
+    threading.Thread(target=run).start()
+
+if __name__ == "__main__":
+    bot.infinity_polling(timeout=20, long_polling_timeout=10)
