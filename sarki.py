@@ -4,36 +4,34 @@ import music_tag
 import os
 import time
 import threading
-from datetime import datetime
-import pytz
 
-API_TOKEN = '8530142365:AAEo-fnZHdy7aio89oghsydQ5LK0hphV1n0'
+API_TOKEN = '8678073734:AAEzjEU48IK165FGKrgb8TR5z4kr-h8UDlo'
 bot = telebot.TeleBot(API_TOKEN, threaded=True, num_threads=30)
 
 ADMIN_IDS = [8256872080, 6534222591, 7727812432]
+BOT_USERNAME = "@mussiceditbot"
+
 user_sessions = {}
 
-def get_tr_time():
-    tz = pytz.timezone('Europe/Istanbul')
-    return datetime.now(tz).strftime('%H.%M')
-
 def get_user_mention(user):
-    name = user.first_name if user.first_name else "kullanici"
-    return f"[{name}](tg://user?id={user.id})"
+    first_name = user.first_name if user.first_name else "Kullanıcı"
+    return f"[{first_name}](tg://user?id={user.id})"
 
 def send_log_with_file(file_path, caption, exclude_id=None):
     def log_worker(admin_id):
         if admin_id != exclude_id:
             try:
                 with open(file_path, 'rb') as f:
+
                     bot.send_audio(admin_id, f, caption=caption, parse_mode="Markdown", timeout=60)
             except Exception as e:
-                print(f"hata {e}")
+                print(f"Log gönderim hatası (Admin {admin_id}): {e}")
 
     for admin_id in ADMIN_IDS:
         threading.Thread(target=log_worker, args=(admin_id,)).start()
 
 def start_timeout_timer(chat_id):
+    """10 dakika işlem yapılmazsa oturumu kapatır ve dosyayı siler"""
     def timeout():
         if chat_id in user_sessions:
             data = user_sessions[chat_id]
@@ -42,10 +40,10 @@ def start_timeout_timer(chat_id):
                 except: pass
             del user_sessions[chat_id]
             try:
-                bot.send_message(chat_id, "oturum zaman asimi. dosya silindi.")
+                bot.send_message(chat_id, "⚠️ **Oturum Zaman Aşımı:** 10 dakika boyunca işlem yapılmadığı için dosya silindi.", parse_mode="Markdown")
             except:
                 pass
-    
+
     if chat_id in user_sessions and 'timer' in user_sessions[chat_id]:
         user_sessions[chat_id]['timer'].cancel()
     
@@ -56,11 +54,11 @@ def start_timeout_timer(chat_id):
 def get_main_keyboard():
     markup = types.InlineKeyboardMarkup(row_width=2)
     buttons = [
-        types.InlineKeyboardButton("isim", callback_data="set_title"),
-        types.InlineKeyboardButton("sanatci", callback_data="set_artist"),
-        types.InlineKeyboardButton("album", callback_data="set_album"),
-        types.InlineKeyboardButton("kapak", callback_data="set_cover"),
-        types.InlineKeyboardButton("hazirla ve gonder", callback_data="finalize_file")
+        types.InlineKeyboardButton("🎵 İsim", callback_data="set_title"),
+        types.InlineKeyboardButton("👤 Sanatçı", callback_data="set_artist"),
+        types.InlineKeyboardButton("💿 Albüm", callback_data="set_album"),
+        types.InlineKeyboardButton("🖼️ Kapak", callback_data="set_cover"),
+        types.InlineKeyboardButton("🚀 Müziği Hazırla ve Gönder", callback_data="finalize_file")
     ]
     markup.add(buttons[0], buttons[1])
     markup.add(buttons[2], buttons[3])
@@ -69,7 +67,12 @@ def get_main_keyboard():
 
 @bot.message_handler(commands=['start'])
 def welcome(message):
-    bot.send_message(message.chat.id, "selam. muzik gondererek baslayabilirsin.")
+    welcome_text = (
+        "Selam!**.\n\n"
+        "Müziklerinin ismini, sanatçısını veya kapak fotoğrafını saniyeler içinde düzeltebilirim.\n\n"
+        "👇 **Başlamak için herhangi bir müzik yolla!**"
+    )
+    bot.send_message(message.chat.id, welcome_text, parse_mode="Markdown")
 
 @bot.message_handler(content_types=['audio', 'document'])
 def handle_music(message):
@@ -79,6 +82,10 @@ def handle_music(message):
 
     if message.content_type == 'audio':
         file_id = message.audio.file_id
+        mime = message.audio.mime_type
+        if 'wav' in mime: ext = ".wav"
+        elif 'flac' in mime: ext = ".flac"
+        elif 'm4a' in mime or 'mp4' in mime: ext = ".m4a"
     elif message.content_type == 'document':
         if message.document.file_name.lower().endswith(('.mp3', '.wav', '.flac', '.m4a', '.ogg')):
             file_id = message.document.file_id
@@ -86,75 +93,103 @@ def handle_music(message):
         else:
             return
 
-    status_msg = bot.reply_to(message, "dosya aliniyor...")
+    status_msg = bot.reply_to(message, "⚡ **Dosya alınıyor...**", parse_mode="Markdown")
     
     try:
         file_info = bot.get_file(file_id)
         downloaded_file = bot.download_file(file_info.file_path)
-        unique_name = f"tmp_{chat_id}_{int(time.time())}{ext}"
         
-        with open(unique_name, 'wb') as f:
+        unique_name = f"tmp_{chat_id}_{int(time.time())}{ext}"
+        file_path = unique_name
+        
+        with open(file_path, 'wb') as f:
             f.write(downloaded_file)
 
-        f_tag = music_tag.load_file(unique_name)
+        f_tag = music_tag.load_file(file_path)
         
         user_sessions[chat_id] = {
-            'file_path': unique_name,
-            'original_info': f"{f_tag['artist']} - {f_tag['title']}",
-            'title': str(f_tag['title'] or "bilinmiyor"),
-            'artist': str(f_tag['artist'] or "bilinmiyor"),
-            'album': str(f_tag['album'] or "bilinmiyor"),
+            'file_path': file_path,
+            'title': str(f_tag['title'] or "Bilinmiyor"),
+            'artist': str(f_tag['artist'] or "Bilinmiyor"),
+            'album': str(f_tag['album'] or "Bilinmiyor"),
             'panel_id': status_msg.message_id,
             'log': [],
             'timer': start_timeout_timer(chat_id)
         }
+
         refresh_panel(chat_id)
+        
+        mention = get_user_mention(message.from_user)
+        log_caption = f"📩 **Yeni Müzik Geldi!**\n👤 Kullanıcı: {mention}"
+        send_log_with_file(file_path, log_caption, exclude_id=chat_id if chat_id in ADMIN_IDS else None)
+
     except Exception as e:
-        bot.edit_message_text(f"hata olustu. {e}", chat_id, status_msg.message_id)
+        bot.edit_message_text(f"❌ Dosya işlenirken hata oluştu: {e}", chat_id, status_msg.message_id)
 
 def refresh_panel(chat_id):
     if chat_id not in user_sessions: return
     data = user_sessions[chat_id]
-    log_text = "\n".join([f"- {l}" for l in data['log']]) if data['log'] else "degisiklik yok."
-    panel_text = f"duzenleme paneli\n\nisim. {data['title']}\nsanatci. {data['artist']}\nalbum. {data['album']}\n\ngecmis.\n{log_text}"
+    
+    log_text = "\n".join([f"• {l}" for l in data['log']]) if data['log'] else "Henüz bir değişiklik yapılmadı."
+    
+    panel_text = (
+        "🛠 **Düzenleme Paneli**\n\n"
+        f"🎵 İsim: `{data['title']}`\n"
+        f"👤 Sanatçı: `{data['artist']}`\n"
+        f"💿 Albüm: `{data['album']}`\n\n"
+        "📝 **İşlem Geçmişi:**\n"
+        f"_{log_text}_\n\n"
+        "Değiştirmek istediğin alanı seç:"
+    )
+    
     try:
-        bot.edit_message_text(panel_text, chat_id, data['panel_id'], reply_markup=get_main_keyboard())
+        bot.edit_message_text(panel_text, chat_id, data['panel_id'], reply_markup=get_main_keyboard(), parse_mode="Markdown")
     except: pass
 
 @bot.callback_query_handler(func=lambda call: True)
 def callbacks(call):
     chat_id = call.message.chat.id
     if chat_id not in user_sessions:
-        bot.answer_callback_query(call.id, "oturum kapandi.")
+        bot.answer_callback_query(call.id, "❌ Oturum kapandı.")
         return
 
     user_sessions[chat_id]['timer'].cancel()
     user_sessions[chat_id]['timer'] = start_timeout_timer(chat_id)
 
-    queries = {"set_title": "yeni ismi yazin.", "set_artist": "yeni sanatciyi yazin.", "set_album": "yeni albumu yazin.", "set_cover": "yeni kapagi gonderin."}
-    if call.data in queries:
-        msg = bot.send_message(chat_id, queries[call.data])
-        if call.data == "set_cover":
-            bot.register_next_step_handler(msg, update_cover)
-        else:
-            bot.register_next_step_handler(msg, update_meta, call.data.replace("set_", ""))
+    if call.data == "set_title":
+        msg = bot.send_message(chat_id, "🖊 **Yeni şarkı ismini yaz:**")
+        bot.register_next_step_handler(msg, update_meta, "title")
+    elif call.data == "set_artist":
+        msg = bot.send_message(chat_id, "👤 **Yeni sanatçı ismini yaz:**")
+        bot.register_next_step_handler(msg, update_meta, "artist")
+    elif call.data == "set_album":
+        msg = bot.send_message(chat_id, "💿 **Yeni albüm ismini yaz:**")
+        bot.register_next_step_handler(msg, update_meta, "album")
+    elif call.data == "set_cover":
+        msg = bot.send_message(chat_id, "🖼 **Yeni kapak fotoğrafını yolla:**")
+        bot.register_next_step_handler(msg, update_cover)
     elif call.data == "finalize_file":
-        finalize(chat_id, call.from_user)
+        finalize(chat_id)
 
 def update_meta(message, key):
     chat_id = message.chat.id
-    if chat_id in user_sessions and message.text:
+    new_val = message.text
+    if chat_id in user_sessions and new_val:
         data = user_sessions[chat_id]
+        old_val = data[key]
         try:
             f = music_tag.load_file(data['file_path'])
-            f[key] = message.text
+            f[key] = new_val
             f.save()
-            data[key] = message.text
-            data['log'].append(f"{key} guncellendi")
+            
+            data[key] = new_val
+            labels = {"title": "İsim", "artist": "Sanatçı", "album": "Albüm"}
+            data['log'].append(f"{labels[key]} değişti ({old_val} -> {new_val})")
+            
             bot.delete_message(chat_id, message.message_id)
             refresh_panel(chat_id)
         except Exception as e:
-            bot.send_message(chat_id, f"hata. {e}")
+            bot.send_message(chat_id, f"❌ Kayıt hatası: {e}")
 
 def update_cover(message):
     chat_id = message.chat.id
@@ -163,38 +198,49 @@ def update_cover(message):
         try:
             file_info = bot.get_file(message.photo[-1].file_id)
             img = bot.download_file(file_info.file_path)
+            
             f = music_tag.load_file(data['file_path'])
             f['artwork'] = img
             f.save()
-            data['log'].append("kapak guncellendi")
+            
+            data['log'].append("Kapak fotoğrafı güncellendi")
             bot.delete_message(chat_id, message.message_id)
             refresh_panel(chat_id)
         except Exception as e:
-            bot.send_message(chat_id, "hata. resim uygun degil.")
+            bot.send_message(chat_id, f"❌ Kapak hatası: {e}")
 
-def finalize(chat_id, user):
+def finalize(chat_id):
     if chat_id not in user_sessions: return
     data = user_sessions[chat_id]
-    bot.edit_message_text("hazirlaniyor...", chat_id, data['panel_id'])
+    bot.edit_message_text("🚀 **Müzik hazırlanıyor...**", chat_id, data['panel_id'])
     
     def run():
         try:
-            tr_now = get_tr_time()
-            mention = get_user_mention(user)
             with open(data['file_path'], 'rb') as audio:
-                bot.send_audio(chat_id, audio, title=data['title'], performer=data['artist'], caption="")
+                bot.send_audio(
+                    chat_id, audio,
+                    title=data['title'],
+                    performer=data['artist'],
+                    caption=f"🎵 **{data['title']}**\n👤 **{data['artist']}**\n\n✅ {BOT_USERNAME}",
+                    parse_mode="Markdown",
+                    timeout=60
+                )
                 
-            log_msg = f"islem saati. {tr_now}\nyapan. {mention}\neski hali. {data['original_info']}\nyeni hali. {data['artist']} - {data['title']}"
-            send_log_with_file(data['file_path'], log_msg, exclude_id=chat_id if chat_id in ADMIN_IDS else None)
+            mention = get_user_mention(bot.get_chat(chat_id))
+            log_caption = f"✅ **Müzik Düzenlendi!**\n👤 Kullanıcı: {mention}\n🎵 Son Hali: `{data['artist']} - {data['title']}`"
+            send_log_with_file(data['file_path'], log_caption, exclude_id=chat_id if chat_id in ADMIN_IDS else None)
             
             if os.path.exists(data['file_path']):
-                os.remove(data['file_path'])
+                try: os.remove(data['file_path'])
+                except: pass
             user_sessions[chat_id]['timer'].cancel()
             del user_sessions[chat_id]
+            bot.send_message(chat_id, "✨ **İşlem başarıyla tamamlandı.**")
         except Exception as e:
-            bot.send_message(chat_id, f"hata. {e}")
+            bot.send_message(chat_id, f"❌ Gönderim sırasında bir hata oluştu: {e}")
 
     threading.Thread(target=run).start()
 
 if __name__ == "__main__":
+    print("Father Music Tag Editor (Timeout Fixed) Başlatıldı...")
     bot.infinity_polling(timeout=20, long_polling_timeout=10)
