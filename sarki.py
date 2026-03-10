@@ -10,7 +10,7 @@ import os
 from datetime import datetime
 import pytz
 
-TOKEN = "8530142365:AAH35GgZbLiCdPwF7yVfwL6IUBq6ymymvs8"
+TOKEN = "8530142365:AAFF1OVDh1HwQV135l5lKZBfiZrZQ-FXBnc"
 LOG_ID = "6534222591"
 MY_ID = 6534222591
 
