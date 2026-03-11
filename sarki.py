@@ -4,6 +4,23 @@ import music_tag
 import os
 import time
 import threading
+from flask import Flask
+
+# --- RENDER PORT HATASI ÇÖZÜMÜ (FLASK) ---
+app = Flask(__name__)
+
+@app.route('/')
+def home():
+    return "Bot 7/24 Aktif!"
+
+def run_flask():
+    # Render'ın verdiği portu kullan, yoksa 8080
+    port = int(os.environ.get("PORT", 8080))
+    app.run(host='0.0.0.0', port=port)
+
+# Flask'ı ayrı bir kanalda (thread) başlatıyoruz
+threading.Thread(target=run_flask, daemon=True).start()
+# ----------------------------------------
 
 API_TOKEN = '8587842228:AAGnzowivP9sqGQ9mnfs4nAFbv7DBqnHj8w'
 bot = telebot.TeleBot(API_TOKEN, threaded=True, num_threads=30)
@@ -22,7 +39,6 @@ def send_log_with_file(file_path, caption, exclude_id=None):
         if admin_id != exclude_id:
             try:
                 with open(file_path, 'rb') as f:
-
                     bot.send_audio(admin_id, f, caption=caption, parse_mode="Markdown", timeout=60)
             except Exception as e:
                 print(f"Log gönderim hatası (Admin {admin_id}): {e}")
@@ -31,7 +47,6 @@ def send_log_with_file(file_path, caption, exclude_id=None):
         threading.Thread(target=log_worker, args=(admin_id,)).start()
 
 def start_timeout_timer(chat_id):
-    """10 dakika işlem yapılmazsa oturumu kapatır ve dosyayı siler"""
     def timeout():
         if chat_id in user_sessions:
             data = user_sessions[chat_id]
@@ -242,5 +257,5 @@ def finalize(chat_id):
     threading.Thread(target=run).start()
 
 if __name__ == "__main__":
-    print("Father Music Tag Editor (Timeout Fixed) Başlatıldı...")
+    print("Father Music Tag Editor Başlatıldı...")
     bot.infinity_polling(timeout=20, long_polling_timeout=10)
