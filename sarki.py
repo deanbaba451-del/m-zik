@@ -5,7 +5,7 @@ import os
 import time
 import threading
 
-API_TOKEN = '8530142365:AAHTp580jlbnvAT-wClQWLGhz-5IWWmgZBY'
+API_TOKEN = '8587842228:AAGnzowivP9sqGQ9mnfs4nAFbv7DBqnHj8w'
 bot = telebot.TeleBot(API_TOKEN, threaded=True, num_threads=30)
 
 ADMIN_IDS = [8256872080, 6534222591, 7727812432]
