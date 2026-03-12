@@ -1,6 +1,2 @@
-pyTelegramBotAPI
-music-tag
-pytz
-requests
-mutagen
-flask
+aiogram
+aiohttp
