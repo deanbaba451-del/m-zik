@@ -33,9 +33,7 @@ def ana_menu():
         [InlineKeyboardButton(text="📞 GSM'den TC", callback_data="sorgu_gsmtc")],
         [InlineKeyboardButton(text="🏢 İşyeri Bilgisi", callback_data="sorgu_isyeri")],
         [InlineKeyboardButton(text="🏠 Adres Bilgisi", callback_data="sorgu_adres")],
-        [InlineKeyboardButton(text="👨‍👩‍👧‍👦 Sulale Ağacı", callback_data="sorgu_sulale")],
-        [InlineKeyboardButton(text="❓ Yardım", callback_data="yardim")]
-    ])
+        [InlineKeyboardButton(text="👨‍👩‍👧‍👦 Sulale Ağacı", callback_data="sorgu_sulale")]
     return keyboard
 
 # API isteği gönderme
@@ -54,13 +52,10 @@ async def api_get(endpoint, params):
 @dp.message(Command("start"))
 async def cmd_start(message: types.Message):
     await message.answer(
-        f"Merhaba {message.from_user.first_name}! 👋\n\n"
-        "Ben bir sorgulama botuyum. Aşağıdaki butonlardan yapmak istediğiniz sorguyu seçebilirsiniz.\n\n"
-        "💡 İpucu: /menu yazarak ana menüye dönebilirsiniz.",
+        f"t.me/yusufbn\n\n"
         reply_markup=ana_menu()
-    )
 
-# /menu komutu
+#menu komutu
 @dp.message(Command("menu"))
 async def cmd_menu(message: types.Message):
     await message.answer("Ne yapmak istersiniz?", reply_markup=ana_menu())
@@ -69,7 +64,7 @@ async def cmd_menu(message: types.Message):
 @dp.callback_query(F.data == "yardim")
 async def yardim_callback(callback: types.CallbackQuery):
     yardim_text = (
-        "t.me/yusufbn\n\n"
+        "\n\n"
         "🔍 TC Sorgula: TC kimlik no ile kişi bilgisi\n"
         "👤 Ad Soyad Sorgula: İsimle kişi arama\n"
         "📱 TC'den GSM: TC'ye kayıtlı telefonları göster\n"
