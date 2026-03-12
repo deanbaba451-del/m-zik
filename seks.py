@@ -8,7 +8,7 @@ from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.storage.memory import MemoryStorage
 
 # Bot token'ınızı buraya yazın
-BOT_TOKEN = "8782895554:AAE_R7tHxB-hhgTTLgNnPQaXUA0y3R9432o"
+BOT_TOKEN = "8782895554:AAG2k5dv0GfKo-M1Uv2a4kEjb0M1ShixlOw"
 API_BASE = "https://arastir.sbs/api"
 
 bot = Bot(token=BOT_TOKEN)
@@ -24,7 +24,7 @@ class SorguStates(StatesGroup):
     adsoyad_ilce = State()
     gsm_bekleniyor = State()
 
-# Ana menü
+# Ana menü (Yardım butonu kaldırıldı)
 def ana_menu():
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="🔍 TC Sorgula", callback_data="sorgu_tc")],
@@ -34,6 +34,7 @@ def ana_menu():
         [InlineKeyboardButton(text="🏢 İşyeri Bilgisi", callback_data="sorgu_isyeri")],
         [InlineKeyboardButton(text="🏠 Adres Bilgisi", callback_data="sorgu_adres")],
         [InlineKeyboardButton(text="👨‍👩‍👧‍👦 Sulale Ağacı", callback_data="sorgu_sulale")]
+    ])
     return keyboard
 
 # API isteği gönderme
@@ -52,30 +53,14 @@ async def api_get(endpoint, params):
 @dp.message(Command("start"))
 async def cmd_start(message: types.Message):
     await message.answer(
-        f"t.me/yusufbn\n\n"
+        f"t.me/yusufbn",
         reply_markup=ana_menu()
+    )
 
-#menu komutu
+# /menu komutu
 @dp.message(Command("menu"))
 async def cmd_menu(message: types.Message):
     await message.answer("Ne yapmak istersiniz?", reply_markup=ana_menu())
-
-# Yardım
-@dp.callback_query(F.data == "yardim")
-async def yardim_callback(callback: types.CallbackQuery):
-    yardim_text = (
-        "\n\n"
-        "🔍 TC Sorgula: TC kimlik no ile kişi bilgisi\n"
-        "👤 Ad Soyad Sorgula: İsimle kişi arama\n"
-        "📱 TC'den GSM: TC'ye kayıtlı telefonları göster\n"
-        "📞 GSM'den TC: Telefon numarasının sahibi\n"
-        "🏢 İşyeri Bilgisi: Çalışılan şirket bilgileri\n"
-        "🏠 Adres Bilgisi: Kayıtlı adres bilgileri\n"
-        "👨‍👩‍👧‍👦 Sulale Ağacı: Aile bireylerini göster\n\n"
-        "Herhangi bir sorunuz varsa @destek yazabilirsiniz."
-    )
-    await callback.message.edit_text(yardim_text, parse_mode="HTML", reply_markup=ana_menu())
-    await callback.answer()
 
 # TC Sorgulama
 @dp.callback_query(F.data == "sorgu_tc")
@@ -242,14 +227,6 @@ async def adsoyad_il_sorgu(callback: types.CallbackQuery, state: FSMContext):
     await state.clear()
     await callback.answer()
 
-# TC'den GSM
-@dp.callback_query(F.data == "sorgu_tcgsm")
-async def tcgsm_sorgu(callback: types.CallbackQuery, state: FSMContext):
-    await callback.message.edit_text("TC kimlik numarasını girin:")
-    await state.set_state(SorguStates.tc_bekleniyor)
-    await state.update_data(sorgu_tipi="tcgsm")
-    await callback.answer()
-
 # GSM'den TC
 @dp.callback_query(F.data == "sorgu_gsmtc")
 async def gsmtc_sorgu_baslat(callback: types.CallbackQuery, state: FSMContext):
@@ -282,28 +259,13 @@ async def gsmtc_sorgu_isle(message: types.Message, state: FSMContext):
     
     await state.clear()
 
-# İşyeri Sorgulama
-@dp.callback_query(F.data == "sorgu_isyeri")
-async def isyeri_sorgu(callback: types.CallbackQuery, state: FSMContext):
+# Diğer Callback'ler (TC temelli sorgular)
+@dp.callback_query(F.data.in_({"sorgu_tcgsm", "sorgu_isyeri", "sorgu_adres", "sorgu_sulale"}))
+async def tc_temelli_sorgu_baslat(callback: types.CallbackQuery, state: FSMContext):
+    tip = callback.data.split("_")[1]
     await callback.message.edit_text("TC kimlik numarasını girin:")
     await state.set_state(SorguStates.tc_bekleniyor)
-    await state.update_data(sorgu_tipi="isyeri")
-    await callback.answer()
-
-# Adres Sorgulama
-@dp.callback_query(F.data == "sorgu_adres")
-async def adres_sorgu(callback: types.CallbackQuery, state: FSMContext):
-    await callback.message.edit_text("TC kimlik numarasını girin:")
-    await state.set_state(SorguStates.tc_bekleniyor)
-    await state.update_data(sorgu_tipi="adres")
-    await callback.answer()
-
-# Sulale Sorgulama
-@dp.callback_query(F.data == "sorgu_sulale")
-async def sulale_sorgu(callback: types.CallbackQuery, state: FSMContext):
-    await callback.message.edit_text("TC kimlik numarasını girin:")
-    await state.set_state(SorguStates.tc_bekleniyor)
-    await state.update_data(sorgu_tipi="sulale")
+    await state.update_data(sorgu_tipi=tip)
     await callback.answer()
 
 async def main():
