@@ -1,276 +1,180 @@
 import asyncio
 import aiohttp
-from aiogram import Bot, Dispatcher, types, F
-from aiogram.filters import Command
-from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
-from aiogram.fsm.context import FSMContext
-from aiogram.fsm.state import State, StatesGroup
-from aiogram.fsm.storage.memory import MemoryStorage
+import sqlite3
+import io
+import re
+from pyrogram import Client, filters, enums
+from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton, Message, CallbackQuery
 
-# Bot token'ınızı buraya yazın
-BOT_TOKEN = "8782895554:AAG2k5dv0GfKo-M1Uv2a4kEjb0M1ShixlOw"
-API_BASE = "https://arastir.sbs/api"
+id_app = 33077604 
+hash_app = "119992704d1dd27a6ebf9d3327189204"
+token_bot = "8479533926:AAG1HB9BkZd6rR1775kQyItM7zMKuEXUQfY"
 
-bot = Bot(token=BOT_TOKEN)
-storage = MemoryStorage()
-dp = Dispatcher(storage=storage)
+owners = [6534222591, 8656150458]
+sight_user = "1340231497"
+sight_key = "yhhqoZzzN6rtdpjQKkvvd6tCvspMW2Vb"
 
-# Sorgulama durumları
-class SorguStates(StatesGroup):
-    tc_bekleniyor = State()
-    adsoyad_ad = State()
-    adsoyad_soyad = State()
-    adsoyad_il = State()
-    adsoyad_ilce = State()
-    gsm_bekleniyor = State()
+def lol_db_init():
+    conn = sqlite3.connect("data.db")
+    cur = conn.cursor()
+    cur.execute("""CREATE TABLE IF NOT EXISTS grps (
+        id INTEGER PRIMARY KEY, 
+        t_lkt INTEGER DEFAULT 0, t_val TEXT, 
+        p_lkt INTEGER DEFAULT 0, p_id TEXT, 
+        c_lkt INTEGER DEFAULT 0, 
+        n_lkt INTEGER DEFAULT 0, n_thr REAL DEFAULT 0.60, n_txt TEXT, 
+        l_ch INTEGER DEFAULT 0, 
+        r_lkt INTEGER DEFAULT 0, 
+        w_lkt INTEGER DEFAULT 0, w_txt TEXT, w_med TEXT)""")
+    conn.commit()
+    conn.close()
 
-# Ana menü (Yardım butonu kaldırıldı)
-def ana_menu():
-    keyboard = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="🔍 TC Sorgula", callback_data="sorgu_tc")],
-        [InlineKeyboardButton(text="👤 Ad Soyad Sorgula", callback_data="sorgu_adsoyad")],
-        [InlineKeyboardButton(text="📱 TC'den GSM", callback_data="sorgu_tcgsm")],
-        [InlineKeyboardButton(text="📞 GSM'den TC", callback_data="sorgu_gsmtc")],
-        [InlineKeyboardButton(text="🏢 İşyeri Bilgisi", callback_data="sorgu_isyeri")],
-        [InlineKeyboardButton(text="🏠 Adres Bilgisi", callback_data="sorgu_adres")],
-        [InlineKeyboardButton(text="👨‍👩‍👧‍👦 Sulale Ağacı", callback_data="sorgu_sulale")]
+def lol_get(cid):
+    conn = sqlite3.connect("data.db")
+    conn.row_factory = sqlite3.Row
+    cur = conn.cursor()
+    cur.execute("SELECT * FROM grps WHERE id = ?", (cid,))
+    res = cur.fetchone()
+    conn.close()
+    return dict(res) if res else None
+
+def lol_upd(cid, k, v):
+    conn = sqlite3.connect("data.db")
+    cur = conn.cursor()
+    cur.execute("INSERT OR IGNORE INTO grps (id, n_txt, w_txt) VALUES (?, ?, ?)", 
+               (cid, "{mention} yasak.", "hoÅ geldin {mention}"))
+    cur.execute(f"UPDATE grps SET {k} = ? WHERE id = ?", (v, cid))
+    conn.commit()
+    conn.close()
+
+app = Client("engine", api_id=id_app, api_hash=hash_app, bot_token=token_bot)
+
+async def lol_scan(bits):
+    url = "https://api.sightengine.com/1.0/check.json"
+    form = aiohttp.FormData()
+    form.add_field('models', 'nudity-2.0,wad,drugs')
+    form.add_field('api_user', sight_user)
+    form.add_field('api_secret', sight_key)
+    form.add_field('media', bits, filename='c.jpg')
+    async with aiohttp.ClientSession() as sess:
+        try:
+            async with sess.post(url, data=form) as r:
+                res = await r.json()
+                if res.get("status") != "success": return 0
+                nude = res.get("nudity", {})
+                v = max(nude.get("sexual_activity", 0), nude.get("sexual_display", 0), nude.get("erotica", 0))
+                return max(v, res.get("weapon", 0), res.get("drugs", 0))
+        except: return 0
+
+@app.on_message(filters.command("start") & filters.private)
+async def lol_start(cl, m):
+    if m.from_user.id not in owners:
+        return await m.reply("yetki yok.")
+    
+    conn = sqlite3.connect("data.db")
+    cur = conn.cursor()
+    cur.execute("SELECT id FROM grps")
+    rows = cur.fetchall()
+    conn.close()
+
+    btns = []
+    for r in rows:
+        try:
+            chat = await cl.get_chat(r[0])
+            btns.append([InlineKeyboardButton(chat.title, callback_data=f"p_{chat.id}")])
+        except: continue
+
+    if not btns:
+        return await m.reply("kayÄ±tlÄ± grup yok. grupta bir mesaj yazÄ±n.")
+        
+    await m.reply("grup:", reply_markup=InlineKeyboardMarkup(btns))
+
+@app.on_callback_query(filters.regex("^p_"))
+async def lol_panel(cl, cq):
+    cid = int(cq.data.split("_")[1])
+    d = lol_get(cid) or {"c_lkt": 0, "n_lkt": 0, "r_lkt": 0, "w_lkt": 0}
+    t = f"id: {cid}\n\ns: {d.get('c_lkt')}\nai: {d.get('n_lkt')}\nr: {d.get('r_lkt')}\nk: {d.get('w_lkt')}"
+    mk = InlineKeyboardMarkup([
+        [InlineKeyboardButton("s", callback_data=f"t_c_lkt_{cid}"), InlineKeyboardButton("r", callback_data=f"t_r_lkt_{cid}")],
+        [InlineKeyboardButton("ai", callback_data=f"t_n_lkt_{cid}"), InlineKeyboardButton("k", callback_data=f"t_w_lkt_{cid}")],
+        [InlineKeyboardButton("geri", callback_data="back")]
     ])
-    return keyboard
+    await cq.edit_message_text(t, reply_markup=mk)
 
-# API isteği gönderme
-async def api_get(endpoint, params):
-    try:
-        async with aiohttp.ClientSession() as session:
-            async with session.get(f"{API_BASE}/{endpoint}", params=params, timeout=30) as response:
-                if response.status == 200:
-                    return await response.json()
-                return None
-    except Exception as e:
-        print(f"API hatası: {e}")
-        return None
+@app.on_callback_query(filters.regex("^t_"))
+async def lol_toggle(cl, cq):
+    _, k, cid = cq.data.split("_", 2)
+    cid = int(cid)
+    d = lol_get(cid) or {k: 0}
+    nv = 0 if d.get(k) else 1
+    lol_upd(cid, k, nv)
+    await lol_panel(cl, cq)
 
-# /start komutu
-@dp.message(Command("start"))
-async def cmd_start(message: types.Message):
-    await message.answer(
-        f"t.me/yusufbn",
-        reply_markup=ana_menu()
-    )
+@app.on_callback_query(filters.regex("^back"))
+async def lol_back(cl, cq):
+    await lol_start(cl, cq.message)
 
-# /menu komutu
-@dp.message(Command("menu"))
-async def cmd_menu(message: types.Message):
-    await message.answer("Ne yapmak istersiniz?", reply_markup=ana_menu())
+@app.on_message(filters.group)
+async def lol_core(cl, m):
+    cid = m.chat.id
+    d = lol_get(cid)
+    if not d:
+        lol_upd(cid, "id", cid)
+        d = lol_get(cid)
 
-# TC Sorgulama
-@dp.callback_query(F.data == "sorgu_tc")
-async def tc_sorgu_baslat(callback: types.CallbackQuery, state: FSMContext):
-    await callback.message.edit_text("TC kimlik numarasını girin (11 haneli):")
-    await state.set_state(SorguStates.tc_bekleniyor)
-    await callback.answer()
+    uid = m.from_user.id if m.from_user else 0
 
-@dp.message(SorguStates.tc_bekleniyor)
-async def tc_sorgu_isle(message: types.Message, state: FSMContext):
-    tc = message.text.strip()
-    
-    if not tc.isdigit() or len(tc) != 11:
-        await message.answer("❌ Hatalı format! TC numarası 11 haneli olmalıdır.")
-        return
-    
-    await message.answer("🔍 Sorgulanıyor, lütfen bekleyin...")
-    
-    sonuc = await api_get("tc.php", {"tc": tc})
-    
-    if sonuc and sonuc.get("success") == "true":
-        cevap = (
-            f"✅ Kişi Bilgileri\n\n"
-            f"👤 Ad Soyad: {sonuc.get('ADI', '-')} {sonuc.get('SOYADI', '-')}\n"
-            f"🆔 TC: {sonuc.get('TC', '-')}\n"
-            f"🎂 Doğum Tarihi: {sonuc.get('DOGUMTARIHI', '-')}\n"
-            f"📍 Nüfus: {sonuc.get('NUFUSIL', '-')} / {sonuc.get('NUFUSILCE', '-')}\n"
-            f"👩 Anne Adı: {sonuc.get('ANNEADI', '-')} (TC: {sonuc.get('ANNETC', '-')})\n"
-            f"👨 Baba Adı: {sonuc.get('BABAADI', '-')} (TC: {sonuc.get('BABATC', '-')})\n"
-            f"🌍 Uyruk: {sonuc.get('UYRUK', '-')}"
-        )
-        await message.answer(cevap, parse_mode="HTML", reply_markup=ana_menu())
+    if not m.service:
+        if d.get("c_lkt") and uid not in owners:
+            try: return await m.delete()
+            except: pass
+
+        if d.get("r_lkt") and uid not in owners:
+            raw = (m.text or m.caption or "").lower()
+            if any(x in raw for x in ["http", "t.me/", ".com", ".net", ".org", "bot"]):
+                return await m.delete()
+            if "@" in raw:
+                men = re.findall(r"@(\w+)", raw)
+                for u in men:
+                    try:
+                        f = await cl.get_users(u) if not u.isdigit() else None
+                        if not f: f = await cl.get_chat(u)
+                        if f: return await m.delete()
+                    except: pass
+
+        if d.get("n_lkt") and uid not in owners and (m.photo or m.video):
+            try:
+                f_d = await cl.download_media(m, in_memory=True)
+                s = await lol_scan(f_d.getbuffer())
+                if s >= d["n_thr"]:
+                    await m.delete()
+                    await cl.send_message(cid, d["n_txt"].format(mention=m.from_user.mention))
+                    if d["l_ch"]:
+                        f_d.seek(0)
+                        await cl.send_photo(d["l_ch"], photo=f_d, caption=f"id: {uid}\ns: {s}")
+            except: pass
     else:
-        await message.answer("❌ Kayıt bulunamadı.", reply_markup=ana_menu())
-    
-    await state.clear()
+        if m.new_chat_title and d.get("t_lkt"):
+            if m.new_chat_title != d["t_val"]:
+                try: await cl.set_chat_title(cid, d["t_val"])
+                except: pass
+        if (m.new_chat_photo or m.delete_chat_photo) and d.get("p_lkt"):
+            if d["p_id"]:
+                try: await cl.set_chat_photo(cid, photo=d["p_id"])
+                except: pass
 
-# Ad Soyad Sorgulama
-@dp.callback_query(F.data == "sorgu_adsoyad")
-async def adsoyad_sorgu_baslat(callback: types.CallbackQuery, state: FSMContext):
-    await callback.message.edit_text("Kişinin adını girin:")
-    await state.set_state(SorguStates.adsoyad_ad)
-    await callback.answer()
-
-@dp.message(SorguStates.adsoyad_ad)
-async def adsoyad_ad_al(message: types.Message, state: FSMContext):
-    await state.update_data(adi=message.text.strip())
-    await message.answer("Şimdi soyadını girin:")
-    await state.set_state(SorguStates.adsoyad_soyad)
-
-@dp.message(SorguStates.adsoyad_soyad)
-async def adsoyad_soyad_al(message: types.Message, state: FSMContext):
-    await state.update_data(soyadi=message.text.strip())
-    
-    keyboard = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="✅ Direkt Sorgula", callback_data="adsoyad_direkt")],
-        [InlineKeyboardButton(text="🗺 İl Ekle", callback_data="adsoyad_il_ekle")]
-    ])
-    
-    await message.answer("Filtreleme yapmak ister misiniz?", reply_markup=keyboard)
-
-@dp.callback_query(F.data == "adsoyad_direkt")
-async def adsoyad_direkt_sorgu(callback: types.CallbackQuery, state: FSMContext):
-    data = await state.get_data()
-    await callback.message.edit_text("🔍 Sorgulanıyor...")
-    
-    sonuc = await api_get("adsoyad.php", {"adi": data['adi'], "soyadi": data['soyadi']})
-    
-    if sonuc and sonuc.get("success") == "true":
-        kayitlar = sonuc.get("data", [])
-        if len(kayitlar) > 10:
-            cevap = f"✅ {len(kayitlar)} kayıt bulundu\n\nİlk 10 kayıt gösteriliyor:\n\n"
-            kayitlar = kayitlar[:10]
-        else:
-            cevap = f"✅ {len(kayitlar)} kayıt bulundu:\n\n"
-        
-        for i, k in enumerate(kayitlar, 1):
-            cevap += (
-                f"{i}. {k.get('ADI', '-')} {k.get('SOYADI', '-')}\n"
-                f"   TC: {k.get('TC', '-')}\n"
-                f"   📍 {k.get('NUFUSIL', '-')} / {k.get('NUFUSILCE', '-')}\n\n"
-            )
-        
-        await callback.message.edit_text(cevap, parse_mode="HTML", reply_markup=ana_menu())
-    else:
-        await callback.message.edit_text("❌ Kayıt bulunamadı.", reply_markup=ana_menu())
-    
-    await state.clear()
-    await callback.answer()
-
-@dp.callback_query(F.data == "adsoyad_il_ekle")
-async def adsoyad_il_ekle(callback: types.CallbackQuery, state: FSMContext):
-    await callback.message.edit_text("İl adını girin:")
-    await state.set_state(SorguStates.adsoyad_il)
-    await callback.answer()
-
-@dp.message(SorguStates.adsoyad_il)
-async def adsoyad_il_al(message: types.Message, state: FSMContext):
-    await state.update_data(il=message.text.strip())
-    
-    keyboard = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="✅ Sorgula", callback_data="adsoyad_il_sorgu")],
-        [InlineKeyboardButton(text="🏘 İlçe Ekle", callback_data="adsoyad_ilce_ekle")]
-    ])
-    
-    await message.answer("İlçe de eklemek ister misiniz?", reply_markup=keyboard)
-
-@dp.callback_query(F.data == "adsoyad_ilce_ekle")
-async def adsoyad_ilce_ekle(callback: types.CallbackQuery, state: FSMContext):
-    await callback.message.edit_text("İlçe adını girin:")
-    await state.set_state(SorguStates.adsoyad_ilce)
-    await callback.answer()
-
-@dp.message(SorguStates.adsoyad_ilce)
-async def adsoyad_ilce_al(message: types.Message, state: FSMContext):
-    await state.update_data(ilce=message.text.strip())
-    data = await state.get_data()
-    
-    await message.answer("🔍 Sorgulanıyor...")
-    
-    params = {"adi": data['adi'], "soyadi": data['soyadi'], "il": data['il'], "ilce": data['ilce']}
-    sonuc = await api_get("adsoyad.php", params)
-    
-    if sonuc and sonuc.get("success") == "true":
-        kayitlar = sonuc.get("data", [])
-        cevap = f"✅ {len(kayitlar)} kayıt bulundu:\n\n"
-        
-        for i, k in enumerate(kayitlar[:10], 1):
-            cevap += (
-                f"{i}. {k.get('ADI', '-')} {k.get('SOYADI', '-')}\n"
-                f"   TC: {k.get('TC', '-')}\n"
-                f"   📍 {k.get('NUFUSIL', '-')} / {k.get('NUFUSILCE', '-')}\n\n"
-            )
-        
-        await message.answer(cevap, parse_mode="HTML", reply_markup=ana_menu())
-    else:
-        await message.answer("❌ Kayıt bulunamadı.", reply_markup=ana_menu())
-    
-    await state.clear()
-
-@dp.callback_query(F.data == "adsoyad_il_sorgu")
-async def adsoyad_il_sorgu(callback: types.CallbackQuery, state: FSMContext):
-    data = await state.get_data()
-    await callback.message.edit_text("🔍 Sorgulanıyor...")
-    
-    params = {"adi": data['adi'], "soyadi": data['soyadi'], "il": data['il']}
-    sonuc = await api_get("adsoyad.php", params)
-    
-    if sonuc and sonuc.get("success") == "true":
-        kayitlar = sonuc.get("data", [])
-        cevap = f"✅ {len(kayitlar)} kayıt bulundu:\n\n"
-        
-        for i, k in enumerate(kayitlar[:10], 1):
-            cevap += (
-                f"{i}. {k.get('ADI', '-')} {k.get('SOYADI', '-')}\n"
-                f"   TC: {k.get('TC', '-')}\n"
-                f"   📍 {k.get('NUFUSIL', '-')} / {k.get('NUFUSILCE', '-')}\n\n"
-            )
-        
-        await callback.message.edit_text(cevap, parse_mode="HTML", reply_markup=ana_menu())
-    else:
-        await callback.message.edit_text("❌ Kayıt bulunamadı.", reply_markup=ana_menu())
-    
-    await state.clear()
-    await callback.answer()
-
-# GSM'den TC
-@dp.callback_query(F.data == "sorgu_gsmtc")
-async def gsmtc_sorgu_baslat(callback: types.CallbackQuery, state: FSMContext):
-    await callback.message.edit_text("GSM numarasını girin (5551234567):")
-    await state.set_state(SorguStates.gsm_bekleniyor)
-    await callback.answer()
-
-@dp.message(SorguStates.gsm_bekleniyor)
-async def gsmtc_sorgu_isle(message: types.Message, state: FSMContext):
-    gsm = message.text.strip()
-    
-    if not gsm.isdigit() or len(gsm) != 10:
-        await message.answer("❌ Hatalı format! GSM 10 haneli olmalıdır (5551234567)")
-        return
-    
-    await message.answer("🔍 Sorgulanıyor...")
-    
-    sonuc = await api_get("gsmtc.php", {"gsm": gsm})
-    
-    if sonuc and sonuc.get("success") == "true":
-        cevap = (
-            f"✅ Numara Sahibi\n\n"
-            f"📱 GSM: {gsm}\n"
-            f"👤 Ad Soyad: {sonuc.get('ADI', '-')} {sonuc.get('SOYADI', '-')}\n"
-            f"🆔 TC: {sonuc.get('TC', '-')}"
-        )
-        await message.answer(cevap, parse_mode="HTML", reply_markup=ana_menu())
-    else:
-        await message.answer("❌ Kayıt bulunamadı.", reply_markup=ana_menu())
-    
-    await state.clear()
-
-# Diğer Callback'ler (TC temelli sorgular)
-@dp.callback_query(F.data.in_({"sorgu_tcgsm", "sorgu_isyeri", "sorgu_adres", "sorgu_sulale"}))
-async def tc_temelli_sorgu_baslat(callback: types.CallbackQuery, state: FSMContext):
-    tip = callback.data.split("_")[1]
-    await callback.message.edit_text("TC kimlik numarasını girin:")
-    await state.set_state(SorguStates.tc_bekleniyor)
-    await state.update_data(sorgu_tipi=tip)
-    await callback.answer()
-
-async def main():
-    print("Bot başlatılıyor...")
-    await dp.start_polling(bot)
+@app.on_message(filters.group & filters.new_chat_members)
+async def lol_wel(cl, m):
+    cid = m.chat.id
+    d = lol_get(cid)
+    if not d or not d["w_lkt"]: return
+    for u in m.new_chat_members:
+        tx = d["w_txt"].format(mention=u.mention, title=m.chat.title, id=u.id)
+        try:
+            if d["w_med"]: await cl.send_cached_media(cid, d["w_med"], caption=tx)
+            else: await cl.send_message(cid, tx)
+        except: await cl.send_message(cid, tx)
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    lol_db_init()
+    app.run()
